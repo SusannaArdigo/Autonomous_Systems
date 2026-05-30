@@ -40,11 +40,12 @@ class Representation:
             "is_connected": nx.is_connected(self.graph) if self.graph.number_of_nodes() > 0 else False
         }
 
-    def plot_adjacency_matrix_heatmap(self) -> None:
+    def plot_adjacency_matrix_heatmap(self, color: str) -> None:
         print(f"##### ADJACENCY HEATMAP: {self.entity} #####")
         size = ceil(self.matrix.shape[0] * 0.22)
-        plot_heatmap(self.matrix, self.labels, self.labels, (size, size), title=f"{self.entity} Projection Adjacency Matrix",
-                     file_name=f"Heatmap_{self.entity}_adjacency_matrix.png", color_map="Greys")
+        plot_heatmap(self.matrix, self.labels, self.labels, (size, size), x_on_top=True,
+                     title=f"{self.entity} Projection Adjacency Matrix",
+                     file_name=f"Adjacency_Matrix_{self.entity}.png", color_map=color)
 
 
     def plot_graph(self, min_weight: float = 1.0) -> None:
@@ -117,15 +118,16 @@ class Data:
             self.print_basic_statistics()
             self.print_graph_summaries()
         if PLOT_MODE:
-            # self.plot_connection_heatmap()
+            self.plot_connection_heatmap()
             self.plot_connection_counts()
 
-        # for representation in [self.computers, self.servers]:
-        #     if PLOT_MODE:
-        #         representation.plot_adjacency_matrix_heatmap()
-        #         representation.plot_graph()
-        #     if PRINT_MODE:
-        #         print_top_centrality_tables(representation.compute_centrality_measures(), representation.entity)
+        for representation in [self.computers, self.servers]:
+            representation.plot_graph()
+            # if PLOT_MODE:
+            #     representation.plot_adjacency_matrix_heatmap(color = "RdPu")
+            #     representation.plot_graph()
+            # if PRINT_MODE:
+            #     print_top_centrality_tables(representation.compute_centrality_measures(), representation.entity)
 
 
     def print_basic_statistics(self) -> None:
@@ -167,6 +169,8 @@ def read_data(path: Path, index: str) -> DataFrame:
     dataset: DataFrame = pd.read_csv(path)
     dataset.set_index(index, inplace=True)
     dataset.columns = dataset.columns.str.strip()
+    dataset = dataset.loc[dataset.sum(axis=1) > 0, dataset.sum(axis=0) > 0]
+    dataset = dataset.sort_index(axis=1)
     dataset = dataset.loc[dataset.sum(axis=1) > 0, dataset.sum(axis=0) > 0]
     return dataset
 
@@ -213,7 +217,7 @@ def plot_heatmap(matrix: np.ndarray, x_labels: List, y_labels: List, figure_size
                  file_name: str, title: str = "", x_font_size: int = 6, y_font_size: int = 6,
                  grid_color: str = "lightgray", x_on_top: bool = False,
                  color_map: str | ListedColormap = ListedColormap(["mistyrose", "crimson"])) -> None:
-    figure, axis = plt.subplots(figsize=figure_size)
+    figure, axis = plt.subplots(figsize=figure_size, dpi=555)
     axis.imshow(matrix, cmap=color_map, aspect="equal")
     axis.set_title(title)
     format_heatmap_axis(axis, x_labels, y_labels, x_font_size, y_font_size, grid_color, x_on_top)
@@ -329,6 +333,6 @@ def print_top_centrality_tables(centrality_table: DataFrame, entity: str, top_n:
 
 if __name__ == '__main__':
     PRINT_MODE: bool = False
-    PLOT_MODE: bool = True
+    PLOT_MODE: bool = False
     data_class: Data = Data()
     data_class.explore()
