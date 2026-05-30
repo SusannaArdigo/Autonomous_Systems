@@ -9,7 +9,7 @@ import pandas as pd
 import networkx as nx
 from numpy import ndarray
 from pandas import DataFrame
-from matplotlib.colors import ListedColormap, Normalize
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap, Normalize
 import matplotlib.pyplot as plt
 
 ########## CLASSES ##########
@@ -48,44 +48,45 @@ class Representation:
                      file_name=f"Adjacency_Matrix_{self.entity}.png", color_map=color)
 
 
-    def plot_graph(self, min_weight: float = 1.0) -> None:
+    def plot_graph(self, min_weight: float | None = None, max_edges: int | None = None, label_top_n: int = 0,
+                   show_isolated_nodes: bool = False, node_color: str = "deeppink") -> None:
         print(f"##### GRAPH: {self.entity} #####")
-        figure, axis = plt.subplots(figsize=(14, 14) if len(self.labels) <= 50 else (22, 22))
-        edge_width_range = (0.2, 2.0) if len(self.labels) <= 50 else (0.05, 0.5)
-        edge_alpha_range = (0.05, 0.35) if len(self.labels) <= 50 else (0.015, 0.08)
         networkx_graph = get_filtered_graph(self.graph, min_weight)
+        networkx_graph = get_strongest_edges_graph(networkx_graph, max_edges)
+        if not show_isolated_nodes:
+            networkx_graph.remove_nodes_from(list(nx.isolates(networkx_graph)))
+        node_count = networkx_graph.number_of_nodes()
+
+        figure_size = (14, 14) if node_count <= 50 else (22, 22)
+        figure, axis = plt.subplots(figsize=figure_size)
+
         degrees = get_weighted_degrees(networkx_graph)
         positions = get_graph_layout(networkx_graph)
         edges = list(networkx_graph.edges(data=True))
 
         weights = get_weights(edges)
-        min_weight, max_weight = min(weights) if weights else 0, max(weights) if weights else 0
+        min_edge_weight, max_edge_weight = min(weights) if weights else 0, max(weights) if weights else 0
+        edge_color_map = LinearSegmentedColormap.from_list("edge_weight", ["lightgray", "black"])
+        edge_color_normalizer = Normalize(vmin=min_edge_weight, vmax=max_edge_weight)
         for node0, node1, attributes in edges:
             weight = attributes["weight"]
             axis.plot([positions[node0][0], positions[node1][0]],
-                      [positions[node0][1], positions[node1][1]], color="gray", zorder=1,
-                      linewidth=scale_value(weight, min_weight, max_weight, edge_width_range[0],
-                                            edge_width_range[1]),
-                      alpha=scale_value(weight, min_weight, max_weight, edge_alpha_range[0], edge_alpha_range[1]))
+                      [positions[node0][1], positions[node1][1]], color=edge_color_map(edge_color_normalizer(weight)),
+                      zorder=1, linewidth=0.6, alpha=0.7)
 
-        sizes = (120, 900) if len(self.labels) <= 50 else (12, 140)
-        min_degree = min(degrees.values()) if degrees else 0
-        max_degree = max(degrees.values()) if degrees else 0
-        colors = get_community_colors(networkx_graph)
-        for node in self.labels:
+        for node in networkx_graph.nodes:
             x, y = positions[node]
-            axis.scatter(x, y,
-                         s=scale_value(degrees[node], min_degree, max_degree, sizes[0], sizes[1]),
-                         color=colors[node],
-                         edgecolor="cadetblue", linewidth=0.6, zorder=2)
+            axis.scatter(x, y, s=70, color=node_color,
+                         edgecolor="white", linewidth=0.6, zorder=2)
 
-        if len(self.labels) <= 50:
-            for node in self.labels:
-                x, y = positions[node]
-                axis.text(x * 1.08, y * 1.08, str(node), ha="center", va="center", fontsize=8)
+        label_nodes = get_label_nodes(degrees, node_count, label_top_n)
+        for node in label_nodes:
+            x, y = positions[node]
+            axis.text(x * 1.08, y * 1.08, str(node), ha="center", va="center", fontsize=8)
 
         axis.set_title(f"{self.entity} Projection Graph")
         axis.set_aspect("equal")
+        axis.margins(0.08)
         axis.axis("off")
         save_plot(figure, f"Graph_{self.entity}_projection.png")
 
@@ -122,12 +123,11 @@ class Data:
             self.plot_connection_counts()
 
         for representation in [self.computers, self.servers]:
-            representation.plot_graph()
-            # if PLOT_MODE:
-            #     representation.plot_adjacency_matrix_heatmap(color = "RdPu")
-            #     representation.plot_graph()
-            # if PRINT_MODE:
-            #     print_top_centrality_tables(representation.compute_centrality_measures(), representation.entity)
+            if PLOT_MODE:
+                representation.plot_adjacency_matrix_heatmap(color = "RdPu")
+                representation.plot_graph()
+            if PRINT_MODE:
+                print_top_centrality_tables(representation.compute_centrality_measures(), representation.entity)
 
 
     def print_basic_statistics(self) -> None:
@@ -287,20 +287,71 @@ def scale_value(value: float, source_min: float, source_max: float, target_min: 
     return target_min + ((value - source_min) / (source_max - source_min)) * (target_max - target_min)
 
 
-def get_filtered_graph(graph: nx.Graph, min_weight: float = 1.0) -> nx.Graph:
+def get_filtered_graph(graph: nx.Graph, min_weight: float | None = None) -> nx.Graph:
     filtered_graph = nx.Graph()
     filtered_graph.add_nodes_from(graph.nodes)
 
     for node0, node1, attributes in graph.edges(data=True):
-        if attributes["weight"] >= min_weight:
+        if min_weight is None or attributes["weight"] >= min_weight:
             filtered_graph.add_edge(node0, node1, weight=attributes["weight"])
     return filtered_graph
 
 
+def get_strongest_edges_graph(graph: nx.Graph, max_edges: int | None) -> nx.Graph:
+    if max_edges is None or graph.number_of_edges() <= max_edges:
+        return graph
+
+    filtered_graph = nx.Graph()
+    filtered_graph.add_nodes_from(graph.nodes)
+    strongest_edges = sorted(graph.edges(data=True), key=lambda edge: edge[2]["weight"], reverse=True)[:max_edges]
+
+    for node0, node1, attributes in strongest_edges:
+        filtered_graph.add_edge(node0, node1, weight=attributes["weight"])
+    return filtered_graph
+
+
 def get_graph_layout(graph: nx.Graph) -> Dict[Hashable, np.ndarray]:
-    if len(graph.nodes) <= 50:
-        return nx.spring_layout(graph, weight="weight", seed=42, iterations=700, k=0.8, scale=3.0)
-    return nx.spring_layout(graph, weight="weight", seed=42, iterations=1000, k=1.6, scale=10.0)
+    node_count = graph.number_of_nodes()
+    if node_count == 0:
+        return {}
+    if graph.number_of_edges() == 0:
+        return nx.circular_layout(graph, scale=max(3.0, np.sqrt(node_count)))
+
+    distance = 2.5 / np.sqrt(node_count)
+    scale = max(4.0, np.sqrt(node_count))
+    return nx.spring_layout(graph, weight="weight", seed=42, iterations=1000, k=distance, scale=scale)
+
+
+def get_edge_width_range(edge_count: int, density: float) -> Tuple[float, float]:
+    if edge_count <= 200 and density <= 0.65:
+        return 0.4, 2.4
+    if edge_count <= 800:
+        return 0.15, 1.2
+    return 0.05, 0.55
+
+
+def get_edge_alpha_range(edge_count: int, density: float) -> Tuple[float, float]:
+    if edge_count <= 200 and density <= 0.65:
+        return 0.18, 0.55
+    if edge_count <= 800:
+        return 0.06, 0.28
+    return 0.02, 0.12
+
+
+def get_node_size_range(node_count: int) -> Tuple[float, float]:
+    if node_count <= 50:
+        return 160, 950
+    if node_count <= 150:
+        return 35, 260
+    return 12, 130
+
+
+def get_label_nodes(degrees: Dict[Hashable, float], node_count: int, label_top_n: int | None) -> List[Hashable]:
+    if label_top_n is None:
+        label_top_n = node_count if node_count <= 50 else 0
+    if label_top_n <= 0:
+        return []
+    return sorted(degrees, key=degrees.get, reverse=True)[:label_top_n]
 
 
 def get_community_colors(graph: nx.Graph) -> (
