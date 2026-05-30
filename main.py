@@ -14,149 +14,68 @@ import matplotlib.pyplot as plt
 
 ########## CLASSES ##########
 
-@dataclass(frozen=True)
-class Node:
-    node_id: Hashable
-
-@dataclass(frozen=True)
-class Edge:
-    node0: Hashable
-    node1: Hashable
-    weight: float # TODO: now int, change to float
-
-
-class Graph:
-    def __init__(self) -> None:
-        self.nodes: Dict[Hashable, Node] = {}
-        self.edges: Dict[Tuple[Hashable, Hashable], Edge] = {}
-
-    def add_node(self, node_id: Hashable) -> Node:
-        if node_id in self.nodes:
-            raise ValueError(f"Node {node_id} already exists.")
-        node = Node(node_id)
-        self.nodes[node_id] = node
-        return node
-
-    def get_node(self, node_id: Hashable) -> Node:
-        if node_id not in self.nodes:
-            raise KeyError(f"Node {node_id} not found.")
-        return self.nodes[node_id]
-
-    @staticmethod
-    def get_edge_key(node0: Hashable, node1: Hashable) -> Tuple[Hashable, Hashable]:
-        return (node0, node1) if node0 <= node1 else (node1, node0)
-
-    def get_edge(self, node0: Hashable, node1: Hashable) -> Edge:
-        key = self.get_edge_key(node0, node1)
-        if key not in self.edges:
-            raise KeyError(f"Edge between {node0} and {node1} not found.")
-        return self.edges[key]
-
-    def get_or_add_node(self, node_id: Hashable) -> Node:
-        if node_id not in self.nodes:
-            return self.add_node(node_id)
-        return self.nodes[node_id]
-
-    def add_edge(self, node0: Hashable, node1: Hashable, weight: float = 1.0) -> Edge:
-        self.get_or_add_node(node0)
-        self.get_or_add_node(node1)
-
-        key = self.get_edge_key(node0, node1)
-        if key in self.edges:
-            edge = self.edges[key]
-            updated_edge = Edge(edge.node0, edge.node1, edge.weight + weight)
-            self.edges[key] = updated_edge
-            return updated_edge
-
-        edge = Edge(key[0], key[1], weight)
-        self.edges[key] = edge
-        return edge
-
-    def print_nodes(self) -> None:
-        for node_id, node in self.nodes.items():
-            print(node)
-
-    def print_edges(self) -> None:
-        print("Edges:")
-        for edge_key, edge in self.edges.items():
-            print(f"({edge_key[0]} - {edge_key[1]})")
-
-    def print_graph(self) -> None:
-        self.print_nodes()
-        self.print_edges()
-
-
 class Representation:
     entity: str
     matrix: np.ndarray
-    graph: Graph
+    graph: nx.Graph
     labels: List[Hashable]
 
     def __init__(self, entity: str, labels: List[Hashable], groups: List[List[Hashable]]) -> None:
         self.entity = entity
         self.labels = labels
-        self.graph = Graph()
-        label_index = {label: index for index, label in enumerate(self.labels)}
-
-        for label in self.labels:
-            self.graph.add_node(label)
-
-        size = len(self.labels)
-        self.matrix = np.zeros((size, size))
-        for group in groups:
-            for i in range(len(group)):
-                for j in range(i + 1, len(group)):
-                    node0 = group[i]
-                    node1 = group[j]
-                    self.graph.add_edge(node0, node1, weight=1.0)  # TODO: modify weight
-                    self.matrix[label_index[node0], label_index[node1]] = 1
-                    self.matrix[label_index[node1], label_index[node0]] = 1
+        self.graph = nx.Graph()
+        self.graph, self.matrix = build_graph_and_adjacency_matrix(self.labels, groups)
 
 
-    def compute_graph_summary(self) -> Dict[str, str | int]:
-        graph = to_networkx_graph(self.graph)
-        component_sizes = [len(component) for component in nx.connected_components(graph)]
+    def compute_graph_summary(self) -> Dict[str, object]:
+        component_sizes = [len(component) for component in nx.connected_components(self.graph)]
 
         return {
             "graph": self.entity,
-            "nodes": graph.number_of_nodes(),
-            "edges": graph.number_of_edges(),
-            "density": nx.density(graph),
-            "connected_components": nx.number_connected_components(graph),
+            "nodes": self.graph.number_of_nodes(),
+            "edges": self.graph.number_of_edges(),
+            "density": nx.density(self.graph),
+            "connected_components": nx.number_connected_components(self.graph),
             "largest_component_size": max(component_sizes) if component_sizes else 0,
-            "is_connected": nx.is_connected(graph) if graph.number_of_nodes() > 0 else False
+            "is_connected": nx.is_connected(self.graph) if self.graph.number_of_nodes() > 0 else False
         }
 
     def plot_adjacency_matrix_heatmap(self) -> None:
+        print(f"##### ADJACENCY HEATMAP: {self.entity} #####")
         size = ceil(self.matrix.shape[0] * 0.22)
         plot_heatmap(self.matrix, self.labels, self.labels, (size, size), title=f"{self.entity} Projection Adjacency Matrix",
-                     file_name=f"Heatmap_{self.entity}_adjacency_matrix.png")
+                     file_name=f"Heatmap_{self.entity}_adjacency_matrix.png", color_map="Reds")
 
 
     def plot_graph(self, min_weight: float = 1.0) -> None:
+        print(f"##### GRAPH: {self.entity} #####")
         figure, axis = plt.subplots(figsize=(14, 14) if len(self.labels) <= 50 else (22, 22))
         edge_width_range = (0.2, 2.0) if len(self.labels) <= 50 else (0.05, 0.5)
         edge_alpha_range = (0.05, 0.35) if len(self.labels) <= 50 else (0.015, 0.08)
-        degrees = get_weighted_degrees(self.graph, min_weight)
-        networkx_graph = to_networkx_graph(self.graph, min_weight)
+        networkx_graph = get_filtered_graph(self.graph, min_weight)
+        degrees = get_weighted_degrees(networkx_graph)
         positions = get_graph_layout(networkx_graph)
-        edges = [edge for edge in self.graph.edges.values() if edge.weight >= min_weight]
+        edges = list(networkx_graph.edges(data=True))
 
         weights = get_weights(edges)
         min_weight, max_weight = min(weights) if weights else 0, max(weights) if weights else 0
-        for edge in edges:
-            axis.plot([positions[edge.node0][0], positions[edge.node1][0]],
-                      [positions[edge.node0][1], positions[edge.node1][1]], color="gray", zorder=1,
-                      linewidth=scale_value(edge.weight, min_weight, max_weight, edge_width_range[0],
+        for node0, node1, attributes in edges:
+            weight = attributes["weight"]
+            axis.plot([positions[node0][0], positions[node1][0]],
+                      [positions[node0][1], positions[node1][1]], color="gray", zorder=1,
+                      linewidth=scale_value(weight, min_weight, max_weight, edge_width_range[0],
                                             edge_width_range[1]),
-                      alpha=scale_value(edge.weight, min_weight, max_weight, edge_alpha_range[0], edge_alpha_range[1]))
+                      alpha=scale_value(weight, min_weight, max_weight, edge_alpha_range[0], edge_alpha_range[1]))
 
         sizes = (120, 900) if len(self.labels) <= 50 else (12, 140)
+        min_degree = min(degrees.values()) if degrees else 0
+        max_degree = max(degrees.values()) if degrees else 0
+        colors = get_community_colors(networkx_graph)
         for node in self.labels:
             x, y = positions[node]
             axis.scatter(x, y,
-                         s=scale_value(degrees[node], min(degrees.values()), max(degrees.values()), sizes[0], sizes[1]),
-                         color=get_community_colors(networkx_graph)[node],
+                         s=scale_value(degrees[node], min_degree, max_degree, sizes[0], sizes[1]),
+                         color=colors[node],
                          edgecolor="cadetblue", linewidth=0.6, zorder=2)
 
         if len(self.labels) <= 50:
@@ -171,11 +90,10 @@ class Representation:
 
 
     def compute_centrality_measures(self) -> DataFrame:
-        graph = to_networkx_graph(self.graph)
         centrality_table = pd.DataFrame({
-            "degree_centrality": nx.degree_centrality(graph),
-            "closeness_centrality": nx.closeness_centrality(graph),
-            "betweenness_centrality": nx.betweenness_centrality(graph)
+            "degree_centrality": nx.degree_centrality(self.graph),
+            "closeness_centrality": nx.closeness_centrality(self.graph),
+            "betweenness_centrality": nx.betweenness_centrality(self.graph)
         })
         centrality_table.index.name = "node"
         return centrality_table
@@ -190,9 +108,9 @@ class Data:
     def __init__(self):
         self.dataframe: pd.DataFrame = read_data(get_data_path(), "ComputerNumber")
         self.computers = Representation("Computers", self.dataframe.index.tolist(),
-                                        [column[column==1].index.tolist() for _, column in self.dataframe.items()])
+                                        [column[column == 1].index.tolist() for _, column in self.dataframe.items()])
         self.servers = (Representation("Servers", self.dataframe.columns.tolist(),
-                                       [row[row==1].index.tolist() for _, row in self.dataframe.iterrows()]))
+                                       [row[row == 1].index.tolist() for _, row in self.dataframe.iterrows()]))
 
     def explore(self) -> None:
         self.print_basic_statistics()
@@ -207,6 +125,7 @@ class Data:
 
 
     def print_basic_statistics(self) -> None:
+        print("##### BASIC STATISTICS #####")
         print(self.dataframe.head())
         print(self.dataframe.describe())
         self.dataframe.info()
@@ -225,6 +144,7 @@ class Data:
 
 
     def print_graph_summaries(self) -> None:
+        print("##### GRAPH SUMMARY #####")
         computers: Dict[str, object] = self.computers.compute_graph_summary()
         servers: Dict[str, object] = self.servers.compute_graph_summary()
         summary_table = pd.DataFrame([computers, servers]).set_index("graph")
@@ -286,9 +206,10 @@ def format_heatmap_axis(axis: plt.Axes, x_labels: List, y_labels: List, x_font_s
 
 def plot_heatmap(matrix: np.ndarray, x_labels: List, y_labels: List, figure_size: Tuple[int, int],
                  file_name: str, title: str = "", x_font_size: int = 6, y_font_size: int = 6,
-                 grid_color: str = "lightgray", x_on_top: bool = False) -> None:
+                 grid_color: str = "lightgray", x_on_top: bool = False,
+                 color_map: str | ListedColormap = ListedColormap(["mistyrose", "crimson"])) -> None:
     figure, axis = plt.subplots(figsize=figure_size)
-    axis.imshow(matrix, cmap=ListedColormap(["mistyrose", "crimson"]), aspect="equal")
+    axis.imshow(matrix, cmap=color_map, aspect="equal")
     axis.set_title(title)
     format_heatmap_axis(axis, x_labels, y_labels, x_font_size, y_font_size, grid_color, x_on_top)
     save_plot(figure, file_name)
@@ -316,13 +237,34 @@ def plot_computer_connection_counts(counts: pd.Series) -> None:
 
 
 ##### PRE-PROCESSING DATA #####
-def get_weighted_degrees(graph: Graph, min_weight: float = 1.0) -> Dict[Hashable, float]:
-    degrees = {node_id: 0.0 for node_id in graph.nodes}
-    for edge in graph.edges.values():
-        if edge.weight >= min_weight:
-            degrees[edge.node0] += edge.weight
-            degrees[edge.node1] += edge.weight
-    return degrees
+def build_graph_and_adjacency_matrix(labels: List[Hashable], groups: List[List[Hashable]]) -> Tuple[nx.Graph, np.ndarray]:
+    graph = nx.Graph()
+    graph.add_nodes_from(labels)
+    label_index = {label: index for index, label in enumerate(labels)}
+
+    size = len(labels)
+    matrix: np.ndarray = np.zeros((size, size))
+    for group in groups:
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                node0 = group[i]
+                node1 = group[j]
+                add_weighted_edge(graph, node0, node1)
+                matrix[label_index[node0], label_index[node1]] += 1
+                matrix[label_index[node1], label_index[node0]] += 1
+    return graph, matrix
+
+
+def add_weighted_edge(graph: nx.Graph, node0: Hashable, node1: Hashable, weight: float = 1.0) -> None:
+    if graph.has_edge(node0, node1):
+        graph[node0][node1]["weight"] += weight
+        return
+
+    graph.add_edge(node0, node1, weight=weight)
+
+
+def get_weighted_degrees(graph: nx.Graph) -> Dict[Hashable, float]:
+    return dict(graph.degree(weight="weight"))
 
 
 def scale_value(value: float, source_min: float, source_max: float, target_min: float,
@@ -332,14 +274,14 @@ def scale_value(value: float, source_min: float, source_max: float, target_min: 
     return target_min + ((value - source_min) / (source_max - source_min)) * (target_max - target_min)
 
 
-def to_networkx_graph(graph: Graph, min_weight: float = 1.0) -> nx.Graph:
-    networkx_graph = nx.Graph()
-    networkx_graph.add_nodes_from(graph.nodes.keys())
-    for edge in graph.edges.values():
-        if edge.weight < min_weight:
-            continue
-        networkx_graph.add_edge(edge.node0, edge.node1, weight=edge.weight)
-    return networkx_graph
+def get_filtered_graph(graph: nx.Graph, min_weight: float = 1.0) -> nx.Graph:
+    filtered_graph = nx.Graph()
+    filtered_graph.add_nodes_from(graph.nodes)
+
+    for node0, node1, attributes in graph.edges(data=True):
+        if attributes["weight"] >= min_weight:
+            filtered_graph.add_edge(node0, node1, weight=attributes["weight"])
+    return filtered_graph
 
 
 def get_graph_layout(graph: nx.Graph) -> Dict[Hashable, np.ndarray]:
@@ -364,10 +306,12 @@ def get_community_colors(graph: nx.Graph) -> (
     return colors
 
 
-def get_weights(edges: List[Edge]) -> List[float]:
-    return [edge.weight for edge in edges]
+def get_weights(edges: List[Tuple[Hashable, Hashable, Dict[str, float]]]) -> List[float]:
+    return [attributes["weight"] for _, _, attributes in edges]
+
 
 def print_top_centrality_tables(centrality_table: DataFrame, entity: str, top_n: int = 10) -> None:
+    print("##### TOP CENTRALITY TABLE #####")
     for column_name in centrality_table.columns:
         top_nodes = centrality_table.sort_values(column_name, ascending=False).head(top_n)
         print(f"\nTop {top_n} {entity} nodes by {column_name.replace('_', ' ')}")
