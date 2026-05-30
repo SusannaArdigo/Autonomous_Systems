@@ -44,7 +44,7 @@ class Representation:
         print(f"##### ADJACENCY HEATMAP: {self.entity} #####")
         size = ceil(self.matrix.shape[0] * 0.22)
         plot_heatmap(self.matrix, self.labels, self.labels, (size, size), title=f"{self.entity} Projection Adjacency Matrix",
-                     file_name=f"Heatmap_{self.entity}_adjacency_matrix.png", color_map="Reds")
+                     file_name=f"Heatmap_{self.entity}_adjacency_matrix.png", color_map="Greys")
 
 
     def plot_graph(self, min_weight: float = 1.0) -> None:
@@ -113,15 +113,19 @@ class Data:
                                        [row[row == 1].index.tolist() for _, row in self.dataframe.iterrows()]))
 
     def explore(self) -> None:
-        self.print_basic_statistics()
-        self.plot_connection_heatmap()
-        self.plot_connection_counts()
-        self.print_graph_summaries()
+        if PRINT_MODE:
+            self.print_basic_statistics()
+            self.print_graph_summaries()
+        if PLOT_MODE:
+            # self.plot_connection_heatmap()
+            self.plot_connection_counts()
 
-        for representation in [self.computers, self.servers]:
-            representation.plot_adjacency_matrix_heatmap()
-            representation.plot_graph()
-            print_top_centrality_tables(representation.compute_centrality_measures(), representation.entity)
+        # for representation in [self.computers, self.servers]:
+        #     if PLOT_MODE:
+        #         representation.plot_adjacency_matrix_heatmap()
+        #         representation.plot_graph()
+        #     if PRINT_MODE:
+        #         print_top_centrality_tables(representation.compute_centrality_measures(), representation.entity)
 
 
     def print_basic_statistics(self) -> None:
@@ -163,6 +167,7 @@ def read_data(path: Path, index: str) -> DataFrame:
     dataset: DataFrame = pd.read_csv(path)
     dataset.set_index(index, inplace=True)
     dataset.columns = dataset.columns.str.strip()
+    dataset = dataset.loc[dataset.sum(axis=1) > 0, dataset.sum(axis=0) > 0]
     return dataset
 
 
@@ -216,23 +221,27 @@ def plot_heatmap(matrix: np.ndarray, x_labels: List, y_labels: List, figure_size
 
 
 def plot_server_connection_counts(counts: pd.Series) -> None:
-    figure, axis = plt.subplots(figsize=(14, 7))
-    axis.bar(counts.index, counts.values, color=get_gradient_colors(counts))
-    axis.set_title("Computers Connected to Each Server")
-    axis.set_xlabel("Server")
-    axis.set_ylabel("Number of Computers")
-    axis.tick_params(axis="x", rotation=90)
-    save_plot(figure, "server_barchart.png")
+    figure, axis = plt.subplots(figsize=(18, 7), dpi=222)
+    bars = axis.bar(counts.index, counts.values, color=get_gradient_colors(counts, "Wistia"))
+    axis.bar_label(bars, padding=2, fontsize=8)
+    axis.set_title("Servers: Number of incoming connections from computers")
+    # axis.set_xlabel("Server")
+    # axis.set_ylabel("Number of Computers")
+    axis.tick_params(axis="x", rotation=0)
+    axis.margins(x=0.01, y=0.1)
+    save_plot(figure, "Barchart_Servers.png")
 
 
 def plot_computer_connection_counts(counts: pd.Series) -> None:
-    figure, axis = plt.subplots(figsize=(18, 7))
-    axis.bar(counts.index.astype(str), counts.values, color=get_gradient_colors(counts))
-    axis.set_title("Servers Connected to Each Computer")
-    axis.set_xlabel("Computer ID")
-    axis.set_ylabel("Number of Servers")
-    axis.tick_params(axis="x", rotation=90, labelsize=6)
-    save_plot(figure, "Computer_barchart.png")
+    figure, axis = plt.subplots(figsize=(9, 24), dpi=555)
+    axis.barh(counts.index.astype(str), counts.values, color=get_gradient_colors(counts, "cool_r"))
+    axis.set_title("Computers: Number of outgoing connections to servers")
+    axis.set_xlabel("Number of Servers")
+    axis.set_ylabel("Computer ID")
+    axis.tick_params(axis="y", labelsize=6)
+    axis.invert_yaxis()
+    axis.margins(x=0.0, y=0.002)
+    save_plot(figure, "Barchart_Computers.png")
 
 
 
@@ -243,7 +252,7 @@ def build_graph_and_adjacency_matrix(labels: List[Hashable], groups: List[List[H
     label_index = {label: index for index, label in enumerate(labels)}
 
     size = len(labels)
-    matrix: np.ndarray = np.zeros((size, size))
+    matrix: np.ndarray = np.zeros((size, size), dtype=int)
     for group in groups:
         for i in range(len(group)):
             for j in range(i + 1, len(group)):
@@ -319,5 +328,7 @@ def print_top_centrality_tables(centrality_table: DataFrame, entity: str, top_n:
 
 
 if __name__ == '__main__':
+    PRINT_MODE: bool = False
+    PLOT_MODE: bool = True
     data_class: Data = Data()
     data_class.explore()
