@@ -215,6 +215,12 @@ class Representation:
         save_plot(figure, f"Largest_Clique_{self.entity}.png")
 
 
+    def identify_heavy_hitters(self, top_n: int = 10) -> None:
+        print(f"\n##### HEAVY HITTERS: {self.entity} #####")
+        print_node_heavy_hitters(self.graph, top_n)
+        print_edge_heavy_hitters(self.graph, top_n)
+
+
 @dataclass
 class Data:
     dataframe: pd.DataFrame
@@ -281,6 +287,11 @@ class Data:
     def identify_largest_cliques(self) -> None:
         self.servers.identify_largest_clique()
         self.computers.identify_largest_clique()
+
+
+    def identify_heavy_hitters(self) -> None:
+        self.servers.identify_heavy_hitters()
+        self.computers.identify_heavy_hitters()
 
 
 ########## HELPER FUNCTIONS ##########
@@ -537,6 +548,22 @@ def get_weights(edges: List[Tuple[Hashable, Hashable, Dict[str, float]]]) -> Lis
     return [attributes["weight"] for _, _, attributes in edges]
 
 
+def print_node_heavy_hitters(graph: nx.Graph, top_n: int) -> None:
+    weighted_degrees = sorted(graph.degree(weight="weight"), key=lambda item: item[1], reverse=True)[:top_n]
+
+    print(f"\nTop {top_n} nodes by weighted degree")
+    for node, weighted_degree in weighted_degrees:
+        print(f"{node}: {weighted_degree:.0f}")
+
+
+def print_edge_heavy_hitters(graph: nx.Graph, top_n: int) -> None:
+    edges = sorted(graph.edges(data=True), key=lambda edge: edge[2]["weight"], reverse=True)[:top_n]
+
+    print(f"\nTop {top_n} edges by weight")
+    for node0, node1, attributes in edges:
+        print(f"{node0} - {node1}: {attributes['weight']:.0f}")
+
+
 def print_top_centrality_tables(centrality_table: DataFrame, entity: str, top_n: int = 10) -> None:
     print("##### TOP CENTRALITY TABLE #####")
     for column_name in centrality_table.columns:
@@ -546,9 +573,10 @@ def print_top_centrality_tables(centrality_table: DataFrame, entity: str, top_n:
 
 
 if __name__ == '__main__':
-    PRINT_MODE: bool = False
-    PLOT_MODE: bool = False
+    PRINT_MODE: bool = True
+    PLOT_MODE: bool = True
     data_class: Data = Data()
-    # data_class.explore()
-    # data_class.indentify_communities()
+    data_class.explore()
+    data_class.indentify_communities()
     data_class.identify_largest_cliques()
+    data_class.identify_heavy_hitters()
