@@ -13,6 +13,7 @@ from matplotlib.colors import ListedColormap, Normalize
 import matplotlib.pyplot as plt
 
 ########## CLASSES ##########
+
 @dataclass(frozen=True)
 class Node:
     node_id: Hashable
@@ -85,16 +86,154 @@ class Graph:
         self.print_edges()
 
 
-@dataclass
 class Representation:
+    entity: str
     matrix: np.ndarray
     graph: Graph
     labels: List[Hashable]
 
+    def __init__(self, entity: str, labels: List[Hashable], groups: List[List[Hashable]]) -> None:
+        self.entity = entity
+        self.labels = labels
+        self.graph = Graph()
+        label_index = {label: index for index, label in enumerate(self.labels)}
+
+        for label in self.labels:
+            self.graph.add_node(label)
+
+        size = len(self.labels)
+        self.matrix = np.zeros((size, size))
+        for group in groups:
+            for i in range(len(group)):
+                for j in range(i + 1, len(group)):
+                    node0 = group[i]
+                    node1 = group[j]
+                    self.graph.add_edge(node0, node1, weight=1.0)  # TODO: modify weight
+                    self.matrix[label_index[node0], label_index[node1]] = 1
+                    self.matrix[label_index[node1], label_index[node0]] = 1
+
+
+    def compute_graph_summary(self) -> Dict[str, str | int]:
+        graph = to_networkx_graph(self.graph)
+        component_sizes = [len(component) for component in nx.connected_components(graph)]
+
+        return {
+            "graph": self.entity,
+            "nodes": graph.number_of_nodes(),
+            "edges": graph.number_of_edges(),
+            "density": nx.density(graph),
+            "connected_components": nx.number_connected_components(graph),
+            "largest_component_size": max(component_sizes) if component_sizes else 0,
+            "is_connected": nx.is_connected(graph) if graph.number_of_nodes() > 0 else False
+        }
+
+    def plot_adjacency_matrix_heatmap(self) -> None:
+        size = ceil(self.matrix.shape[0] * 0.22)
+        plot_heatmap(self.matrix, self.labels, self.labels, (size, size), title=f"{self.entity} Projection Adjacency Matrix",
+                     file_name=f"Heatmap_{self.entity}_adjacency_matrix.png")
+
+
+    def plot_graph(self, min_weight: float = 1.0) -> None:
+        figure, axis = plt.subplots(figsize=(14, 14) if len(self.labels) <= 50 else (22, 22))
+        edge_width_range = (0.2, 2.0) if len(self.labels) <= 50 else (0.05, 0.5)
+        edge_alpha_range = (0.05, 0.35) if len(self.labels) <= 50 else (0.015, 0.08)
+        degrees = get_weighted_degrees(self.graph, min_weight)
+        networkx_graph = to_networkx_graph(self.graph, min_weight)
+        positions = get_graph_layout(networkx_graph)
+        edges = [edge for edge in self.graph.edges.values() if edge.weight >= min_weight]
+
+        weights = get_weights(edges)
+        min_weight, max_weight = min(weights) if weights else 0, max(weights) if weights else 0
+        for edge in edges:
+            axis.plot([positions[edge.node0][0], positions[edge.node1][0]],
+                      [positions[edge.node0][1], positions[edge.node1][1]], color="gray", zorder=1,
+                      linewidth=scale_value(edge.weight, min_weight, max_weight, edge_width_range[0],
+                                            edge_width_range[1]),
+                      alpha=scale_value(edge.weight, min_weight, max_weight, edge_alpha_range[0], edge_alpha_range[1]))
+
+        sizes = (120, 900) if len(self.labels) <= 50 else (12, 140)
+        for node in self.labels:
+            x, y = positions[node]
+            axis.scatter(x, y,
+                         s=scale_value(degrees[node], min(degrees.values()), max(degrees.values()), sizes[0], sizes[1]),
+                         color=get_community_colors(networkx_graph)[node],
+                         edgecolor="cadetblue", linewidth=0.6, zorder=2)
+
+        if len(self.labels) <= 50:
+            for node in self.labels:
+                x, y = positions[node]
+                axis.text(x * 1.08, y * 1.08, str(node), ha="center", va="center", fontsize=8)
+
+        axis.set_title(f"{self.entity} Projection Graph")
+        axis.set_aspect("equal")
+        axis.axis("off")
+        save_plot(figure, f"Graph_{self.entity}_projection.png")
+
+
+    def compute_centrality_measures(self) -> DataFrame:
+        graph = to_networkx_graph(self.graph)
+        centrality_table = pd.DataFrame({
+            "degree_centrality": nx.degree_centrality(graph),
+            "closeness_centrality": nx.closeness_centrality(graph),
+            "betweenness_centrality": nx.betweenness_centrality(graph)
+        })
+        centrality_table.index.name = "node"
+        return centrality_table
+
+
+@dataclass
+class Data:
+    dataframe: pd.DataFrame
+    computers: Representation
+    servers: Representation
+
+    def __init__(self):
+        self.dataframe: pd.DataFrame = read_data(get_data_path(), "ComputerNumber")
+        self.computers = Representation("Computers", self.dataframe.index.tolist(),
+                                        [column[column==1].index.tolist() for _, column in self.dataframe.items()])
+        self.servers = (Representation("Servers", self.dataframe.columns.tolist(),
+                                       [row[row==1].index.tolist() for _, row in self.dataframe.iterrows()]))
+
+    def explore(self) -> None:
+        self.print_basic_statistics()
+        self.plot_connection_heatmap()
+        self.plot_connection_counts()
+        self.print_graph_summaries()
+
+        for representation in [self.computers, self.servers]:
+            representation.plot_adjacency_matrix_heatmap()
+            representation.plot_graph()
+            print_top_centrality_tables(representation.compute_centrality_measures(), representation.entity)
+
+
+    def print_basic_statistics(self) -> None:
+        print(self.dataframe.head())
+        print(self.dataframe.describe())
+        self.dataframe.info()
+
+
+    def plot_connection_heatmap(self) -> None:
+        rows, columns = self.dataframe.shape
+        plot_heatmap(self.dataframe.to_numpy(), self.dataframe.columns.tolist(), self.dataframe.index.tolist(),
+                     (ceil(columns * 0.7), ceil(rows * 0.22)),
+                     "Heatmap_connections.png", x_font_size=12, y_font_size=8, grid_color="deeppink", x_on_top=True)
+
+
+    def plot_connection_counts(self) -> None:
+        plot_server_connection_counts(self.dataframe.sum(axis=0))
+        plot_computer_connection_counts(self.dataframe.sum(axis=1))
+
+
+    def print_graph_summaries(self) -> None:
+        computers: Dict[str, object] = self.computers.compute_graph_summary()
+        servers: Dict[str, object] = self.servers.compute_graph_summary()
+        summary_table = pd.DataFrame([computers, servers]).set_index("graph")
+
+        print("\nProjected graph summary")
+        print(summary_table.to_string(float_format=lambda value: f"{value:.4f}"))
 
 
 ########## HELPER FUNCTIONS ##########
-
 ##### READ-WRITE OPERATIONS #####
 def get_data_path() -> Path:
     return Path(os.path.join("data" if os.path.exists("data") else ".", "Autonomous_Systems.csv"))
@@ -109,12 +248,6 @@ def read_data(path: Path, index: str) -> DataFrame:
 
 def save_data(data: DataFrame, path: Path) -> None:
     data.to_csv(path, index=True)
-
-
-def print_basic_statistics(data: DataFrame) -> None:
-    print(data.head())
-    print(data.describe())
-    data.info()
 
 
 def save_plot(figure: plt.Figure, file_name: str) -> None:
@@ -132,9 +265,8 @@ def get_gradient_colors(values: pd.Series, color: str = "magma_r") -> List:
 
 
 def format_heatmap_axis(axis: plt.Axes, x_labels: List, y_labels: List, x_font_size: int = 6, y_font_size: int = 6,
-        grid_color: str = "lightgray", x_on_top: bool = False) -> None:
-    rows = len(y_labels)
-    columns = len(x_labels)
+                        grid_color: str = "lightgray", x_on_top: bool = False) -> None:
+    rows, columns = len(y_labels), len(x_labels)
 
     axis.set_xticks(range(columns))
     axis.set_yticks(range(rows))
@@ -162,17 +294,9 @@ def plot_heatmap(matrix: np.ndarray, x_labels: List, y_labels: List, figure_size
     save_plot(figure, file_name)
 
 
-def plot_connection_heatmap(data: DataFrame) -> None:
-    rows, columns = data.shape
-    plot_heatmap(data.to_numpy(), data.columns.tolist(), data.index.tolist(),(ceil(columns * 0.7), ceil(rows * 0.22)),
-        "Heatmap_connections.png", x_font_size=12, y_font_size=8, grid_color="deeppink", x_on_top=True)
-
-
-def plot_server_connection_counts(data: DataFrame) -> None:
-    server_counts = data.sum(axis=0)
-
+def plot_server_connection_counts(counts: pd.Series) -> None:
     figure, axis = plt.subplots(figsize=(14, 7))
-    axis.bar(server_counts.index, server_counts.values, color=get_gradient_colors(server_counts))
+    axis.bar(counts.index, counts.values, color=get_gradient_colors(counts))
     axis.set_title("Computers Connected to Each Server")
     axis.set_xlabel("Server")
     axis.set_ylabel("Number of Computers")
@@ -180,11 +304,9 @@ def plot_server_connection_counts(data: DataFrame) -> None:
     save_plot(figure, "server_barchart.png")
 
 
-def plot_computer_connection_counts(data: DataFrame) -> None:
-    computer_counts = data.sum(axis=1)
-
+def plot_computer_connection_counts(counts: pd.Series) -> None:
     figure, axis = plt.subplots(figsize=(18, 7))
-    axis.bar(computer_counts.index.astype(str), computer_counts.values, color=get_gradient_colors(computer_counts))
+    axis.bar(counts.index.astype(str), counts.values, color=get_gradient_colors(counts))
     axis.set_title("Servers Connected to Each Computer")
     axis.set_xlabel("Computer ID")
     axis.set_ylabel("Number of Servers")
@@ -192,40 +314,8 @@ def plot_computer_connection_counts(data: DataFrame) -> None:
     save_plot(figure, "Computer_barchart.png")
 
 
-def build_projection_representation(labels: List[Hashable], groups: List[List[Hashable]]) -> Representation:
-    graph = Graph()
-    label_index = {label: index for index, label in enumerate(labels)}
 
-    for label in labels:
-        graph.add_node(label)
-
-    size = len(labels)
-    matrix: np.ndarray = np.zeros((size, size))
-    for group in groups:
-        for i in range(len(group)):
-            for j in range(i + 1, len(group)):
-                node0 = group[i]
-                node1 = group[j]
-                graph.add_edge(node0, node1, weight=1.0) #TODO: modify weight
-                matrix[label_index[node0], label_index[node1]] = 1
-                matrix[label_index[node1], label_index[node0]] = 1
-    return Representation(matrix, graph, labels)
-
-
-def build_computers_representation(data: DataFrame) -> Representation:
-    return build_projection_representation(data.index.tolist(), [col[col==1].index.tolist() for _, col in data.items()])
-
-
-def build_servers_representation(data: pd.DataFrame) -> Representation:
-    return build_projection_representation(data.columns.tolist(), [r[r==1].index.tolist() for _, r in data.iterrows()])
-
-
-def plot_adjacency_matrix_heatmap(matrix: np.ndarray, labels: List[Hashable], entity: str) -> None:
-    size = ceil(matrix.shape[0] * 0.22)
-    plot_heatmap(matrix, labels, labels,(size, size), title=f"{entity} Projection Adjacency Matrix",
-                 file_name=f"Heatmap_{entity}_adjacency_matrix.png")
-
-
+##### PRE-PROCESSING DATA #####
 def get_weighted_degrees(graph: Graph, min_weight: float = 1.0) -> Dict[Hashable, float]:
     degrees = {node_id: 0.0 for node_id in graph.nodes}
     for edge in graph.edges.values():
@@ -277,53 +367,6 @@ def get_community_colors(graph: nx.Graph) -> (
 def get_weights(edges: List[Edge]) -> List[float]:
     return [edge.weight for edge in edges]
 
-
-def plot_graph(raw_graph: Graph, labels: List[Hashable], entity: str, min_weight: float = 1.0) -> None:
-    figure, axis = plt.subplots(figsize=(14, 14) if len(labels) <= 50 else (22, 22))
-    edge_width_range = (0.2, 2.0) if len(labels) <= 50 else (0.05, 0.5)
-    edge_alpha_range = (0.05, 0.35) if len(labels) <= 50 else (0.015, 0.08)
-    degrees = get_weighted_degrees(raw_graph, min_weight)
-    networkx_graph = to_networkx_graph(raw_graph, min_weight)
-    positions = get_graph_layout(networkx_graph)
-    edges = [edge for edge in raw_graph.edges.values() if edge.weight >= min_weight]
-
-    weights = get_weights(edges)
-    min_weight, max_weight = min(weights) if weights else 0, max(weights) if weights else 0
-    for edge in edges:
-        axis.plot([positions[edge.node0][0], positions[edge.node1][0]],
-                  [positions[edge.node0][1], positions[edge.node1][1]], color="gray", zorder=1,
-                  linewidth=scale_value(edge.weight, min_weight, max_weight, edge_width_range[0], edge_width_range[1]),
-                  alpha=scale_value(edge.weight, min_weight, max_weight, edge_alpha_range[0], edge_alpha_range[1]))
-
-    sizes = (120, 900) if len(labels) <= 50 else (12, 140)
-    for node in labels:
-        x, y = positions[node]
-        axis.scatter(x, y, s=scale_value(degrees[node], min(degrees.values()), max(degrees.values()), sizes[0], sizes[1]),
-                     color=get_community_colors(networkx_graph)[node],
-                     edgecolor="cadetblue", linewidth=0.6, zorder=2)
-
-    if len(labels) <= 50:
-        for node in labels:
-            x, y = positions[node]
-            axis.text(x * 1.08, y * 1.08, str(node), ha="center", va="center", fontsize=8)
-
-    axis.set_title(f"{entity} Projection Graph")
-    axis.set_aspect("equal")
-    axis.axis("off")
-    save_plot(figure, f"Graph_{entity}_projection.png")
-
-
-def compute_centrality_measures(representation: Representation) -> DataFrame:
-    graph = to_networkx_graph(representation.graph)
-    centrality_table = pd.DataFrame({
-        "degree_centrality": nx.degree_centrality(graph),
-        "closeness_centrality": nx.closeness_centrality(graph),
-        "betweenness_centrality": nx.betweenness_centrality(graph)
-    })
-    centrality_table.index.name = "node"
-    return centrality_table
-
-
 def print_top_centrality_tables(centrality_table: DataFrame, entity: str, top_n: int = 10) -> None:
     for column_name in centrality_table.columns:
         top_nodes = centrality_table.sort_values(column_name, ascending=False).head(top_n)
@@ -331,52 +374,6 @@ def print_top_centrality_tables(centrality_table: DataFrame, entity: str, top_n:
         print(top_nodes.to_string(float_format=lambda value: f"{value:.4f}"))
 
 
-def compute_graph_summary(representation: Representation, entity: str) -> Dict[str, object]:
-    graph = to_networkx_graph(representation.graph)
-    component_sizes = [len(component) for component in nx.connected_components(graph)]
-
-    return {
-        "graph": entity,
-        "nodes": graph.number_of_nodes(),
-        "edges": graph.number_of_edges(),
-        "density": nx.density(graph),
-        "connected_components": nx.number_connected_components(graph),
-        "largest_component_size": max(component_sizes) if component_sizes else 0,
-        "is_connected": nx.is_connected(graph) if graph.number_of_nodes() > 0 else False
-    }
-
-
-def print_graph_summaries(computer_representation: Representation, server_representation: Representation) -> None:
-    summary_table = pd.DataFrame([compute_graph_summary(computer_representation, "Computer"),
-                                  compute_graph_summary(server_representation, "Server")]).set_index("graph")
-
-    print("\nProjected graph summary")
-    print(summary_table.to_string(float_format=lambda value: f"{value:.4f}"))
-
-
-def explore_data(data: DataFrame) -> None:
-    print_basic_statistics(data)
-    plot_connection_heatmap(data)
-    plot_server_connection_counts(data)
-    plot_computer_connection_counts(data)
-    computers: Representation = build_computers_representation(data)
-    plot_adjacency_matrix_heatmap(computers.matrix, computers.labels, "Computer")
-    plot_graph(computers.graph, computers.labels, "Computer", min_weight=1.0)
-
-    servers: Representation = build_servers_representation(data)
-    plot_adjacency_matrix_heatmap(servers.matrix, servers.labels, "Server")
-    plot_graph(servers.graph, servers.labels, "Server")
-
-    print_graph_summaries(computers, servers)
-
-    computer_centralities = compute_centrality_measures(computers)
-    print_top_centrality_tables(computer_centralities, "Computer")
-
-    server_centralities = compute_centrality_measures(servers)
-    print_top_centrality_tables(server_centralities, "Server")
-
-
 if __name__ == '__main__':
-    a = "entity"
-    dataframe: DataFrame = read_data(get_data_path(), "ComputerNumber")
-    explore_data(dataframe)
+    data_class: Data = Data()
+    data_class.explore()
