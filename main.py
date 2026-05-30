@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 from math import ceil
-from typing import Dict, Tuple, List, Hashable, Any
+from typing import Dict, Tuple, List, Hashable, Any, Set
 from pathlib import Path
 
 import numpy as np
@@ -100,6 +100,120 @@ class Representation:
         centrality_table.index.name = "node"
         return centrality_table
 
+    def identify_communities(self) -> None:
+        self.show_communities(self.detect_communities_with_louvain(), "Louvain", color="Set1")
+        self.show_communities(self.detect_communities_with_girvan_newman(), "Girvan-Newman", "Set1")
+
+
+    def detect_communities_with_girvan_newman(self) -> List[Set]:
+        best_communities = [set(community) for community in nx.connected_components(self.graph)]
+        best_modularity = nx.community.modularity(self.graph, best_communities, weight="weight")
+        max_splits = min(10, self.graph.number_of_nodes() - 1)
+
+        for index, communities in enumerate(nx.community.girvan_newman(self.graph)):
+            communities = [set(community) for community in communities]
+            modularity = nx.community.modularity(self.graph, communities, weight="weight")
+            if modularity > best_modularity:
+                best_communities = communities
+                best_modularity = modularity
+            if index + 1 >= max_splits:
+                break
+        return best_communities
+
+    def detect_communities_with_louvain(self) -> List[Set]:
+        try:
+            return [set(community)
+                    for community in nx.community.louvain_communities(self.graph, weight="weight", seed=42)]
+        except AttributeError:
+            return [set(community) for community in nx.community.greedy_modularity_communities(
+                self.graph, weight="weight")]
+
+
+    def show_communities(self, communities: List[Set], algorithm: str, color: str,
+                         edge_mode: str = "intra_community") -> None:
+        print(f"\n##### COMMUNITIES: {self.entity} - {algorithm} {len(communities)} #####")
+        print_community_statistics(self.graph, communities)
+        for community_index, community in enumerate(communities):
+            print(f"Community {community_index + 1}: {', '.join(str(node) for node in sorted(community))}")
+        figure_size = (14, 14) if self.graph.number_of_nodes() <= 50 else (22, 22)
+        figure, axis = plt.subplots(figsize=figure_size)
+
+        positions = get_graph_layout(self.graph)
+        node_communities = get_node_communities(communities)
+        edges = get_community_plot_edges(self.graph, node_communities, edge_mode)
+        weights = get_weights(edges)
+        min_edge_weight, max_edge_weight = min(weights) if weights else 0, max(weights) if weights else 0
+        edge_color_map = LinearSegmentedColormap.from_list("edge_weight", ["lightgray", "black"])
+        edge_color_normalizer = Normalize(vmin=min_edge_weight, vmax=max_edge_weight)
+
+        for node0, node1, attributes in edges:
+            weight = attributes["weight"]
+            axis.plot([positions[node0][0], positions[node1][0]],
+                      [positions[node0][1], positions[node1][1]], color=edge_color_map(edge_color_normalizer(weight)),
+                      zorder=1, linewidth=0.6, alpha=0.7)
+
+        color_map = plt.get_cmap(color)
+        node_colors = {}
+        for community_index, community in enumerate(communities):
+            color = color_map(community_index % color_map.N)
+            for node in community:
+                node_colors[node] = color
+
+        for node in self.graph.nodes:
+            x, y = positions[node]
+            axis.scatter(x, y, s=70, color=node_colors[node],
+                         edgecolor="white", linewidth=0.6, zorder=2)
+
+        axis.set_title(f"{self.entity} Communities: {algorithm.replace('_', ' ').title()}")
+        axis.set_aspect("equal")
+        axis.margins(0.08)
+        axis.axis("off")
+        save_plot(figure, f"Communities_{self.entity}_{algorithm}.png")
+
+
+    def identify_largest_clique(self) -> Set:
+        largest_clique = get_largest_clique(self.graph)
+        print(f"\n##### LARGEST CLIQUE: {self.entity} #####")
+        print(f"Size: {len(largest_clique)}")
+        print(f"Nodes: {', '.join(str(node) for node in sorted(largest_clique))}")
+        self.plot_largest_clique(largest_clique)
+        return largest_clique
+
+
+    def plot_largest_clique(self, largest_clique: Set, clique_color: str = "deeppink",
+                            node_color: str = "lightgray") -> None:
+        print(f"##### CLIQUE PLOT: {self.entity} #####")
+        figure_size = (14, 14) if self.graph.number_of_nodes() <= 50 else (22, 22)
+        figure, axis = plt.subplots(figsize=figure_size)
+
+        positions = get_graph_layout(self.graph)
+        clique_edges = set()
+        for node0, node1 in self.graph.edges:
+            if node0 in largest_clique and node1 in largest_clique:
+                clique_edges.add((node0, node1))
+                clique_edges.add((node1, node0))
+
+        for node0, node1, _ in self.graph.edges(data=True):
+            is_clique_edge = (node0, node1) in clique_edges
+            axis.plot([positions[node0][0], positions[node1][0]],
+                      [positions[node0][1], positions[node1][1]],
+                      color="mistyrose" if is_clique_edge else "ghostwhite",
+                      zorder=1, linewidth=1.0 if is_clique_edge else 0.4,
+                      alpha=0.65 if is_clique_edge else 0.2)
+
+        for node in self.graph.nodes:
+            x, y = positions[node]
+            is_clique_node = node in largest_clique
+            axis.scatter(x, y, s=90 if is_clique_node else 55,
+                         color=clique_color if is_clique_node else node_color,
+                         edgecolor="white", linewidth=0.6, zorder=2)
+
+        axis.set_title(f"{self.entity} Largest Clique")
+        axis.set_aspect("equal")
+        axis.margins(0.08)
+        axis.axis("off")
+        save_plot(figure, f"Largest_Clique_{self.entity}.png")
+
 
 @dataclass
 class Data:
@@ -157,6 +271,16 @@ class Data:
 
         print("\nProjected graph summary")
         print(summary_table.to_string(float_format=lambda value: f"{value:.4f}"))
+
+
+    def indentify_communities(self) -> None:
+        self.servers.identify_communities()
+        self.computers.identify_communities()
+
+
+    def identify_largest_cliques(self) -> None:
+        self.servers.identify_largest_clique()
+        self.computers.identify_largest_clique()
 
 
 ########## HELPER FUNCTIONS ##########
@@ -310,6 +434,45 @@ def get_strongest_edges_graph(graph: nx.Graph, max_edges: int | None) -> nx.Grap
     return filtered_graph
 
 
+def get_largest_clique(graph: nx.Graph) -> Set:
+    if graph.number_of_nodes() == 0:
+        return set()
+    return set(max(nx.find_cliques(graph), key=len))
+
+
+def get_node_communities(communities: List[Set]) -> Dict[Hashable, int]:
+    node_communities = {}
+    for community_index, community in enumerate(communities):
+        for node in community:
+            node_communities[node] = community_index
+    return node_communities
+
+
+def get_community_plot_edges(graph: nx.Graph, node_communities: Dict[Hashable, int],
+                             edge_mode: str) -> List[Tuple[Hashable, Hashable, Dict[str, float]]]:
+    if edge_mode == "all":
+        return list(graph.edges(data=True))
+
+    if edge_mode == "intra_community":
+        return [(node0, node1, attributes) for node0, node1, attributes in graph.edges(data=True)
+                if node_communities[node0] == node_communities[node1]]
+
+    if edge_mode == "inter_community":
+        return [(node0, node1, attributes) for node0, node1, attributes in graph.edges(data=True)
+                if node_communities[node0] != node_communities[node1]]
+
+    raise ValueError(f"Unknown community edge mode: {edge_mode}")
+
+
+def print_community_statistics(graph: nx.Graph, communities: List[Set]) -> None:
+    sizes = sorted([len(community) for community in communities], reverse=True)
+    modularity = nx.community.modularity(graph, communities, weight="weight") if communities else 0
+
+    print(f"Number of communities: {len(communities)}")
+    print(f"Modularity: {modularity:.4f}")
+    print(f"Community sizes: {', '.join(str(size) for size in sizes)}")
+
+
 def get_graph_layout(graph: nx.Graph) -> Dict[Hashable, np.ndarray]:
     node_count = graph.number_of_nodes()
     if node_count == 0:
@@ -386,4 +549,6 @@ if __name__ == '__main__':
     PRINT_MODE: bool = False
     PLOT_MODE: bool = False
     data_class: Data = Data()
-    data_class.explore()
+    # data_class.explore()
+    # data_class.indentify_communities()
+    data_class.identify_largest_cliques()
