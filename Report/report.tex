@@ -3,11 +3,23 @@
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
-\usepackage[a4paper,margin=0.75in]{geometry}
+\usepackage[a4paper,margin=2cm]{geometry}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{hyperref}
 \usepackage{float}
+\usepackage{subcaption}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+
+\titlespacing*{\section}{0pt}{1.0em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.7em}{0.35em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Autonomous Systems}
+\rhead{Susanna Ardig\`o}
+\cfoot{\thepage}
 
 \title{Autonomous Systems}
 \author{Susanna Ardig\`o}
@@ -33,13 +45,39 @@ The analysis was first developed in a Python script and then transferred to a no
 
 The dataset is a binary connection matrix: rows represent computers, columns represent servers, and each entry indicates whether a connection exists.
 
-During loading, empty rows and columns are removed because they do not contribute meaningful information to the projected graphs. Basic statistics and the cleaned matrix visualization are provided in the notebook.
+During loading, empty rows and columns are removed because they do not contribute meaningful information to the projected graphs. Basic statistics and the cleaned matrix visualization are provided in the notebook, while Figure~\ref{fig:original-matrix} gives a compact view of the original matrix and the two projections.
 
 \subsection{Graph Projections}
 
 Since rows and columns represent different entity types, two weighted graph projections are constructed. The computer graph links computers sharing at least one server; the server graph links servers sharing at least one computer.
 
-The edge weight is the number of shared connections, preserving the strength of each relationship.
+The edge weight is the number of shared connections, preserving the strength of each relationship. Figure~\ref{fig:original-matrix} shows the original matrix, while Figures~\ref{fig:computer-adjacency} and~\ref{fig:server-adjacency} show the two projected adjacency matrices.
+
+\begin{figure}[h]
+    \centering
+    \begin{subfigure}{0.18\textwidth}
+        \centering
+        \includegraphics[height=0.24\textheight]{../res/Heatmap_connections.png}
+        \caption{Original matrix.}
+        \label{fig:original-matrix}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.38\textwidth}
+        \centering
+        \includegraphics[height=0.24\textheight]{../res/Adjacency_Matrix_Computers.png}
+        \caption{Computer projection.}
+        \label{fig:computer-adjacency}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.38\textwidth}
+        \centering
+        \includegraphics[height=0.24\textheight]{../res/Adjacency_Matrix_Servers.png}
+        \caption{Server projection.}
+        \label{fig:server-adjacency}
+    \end{subfigure}
+    \caption{Original connection matrix and weighted adjacency matrices. White cells indicate no edge; darker cells indicate stronger shared-connection weights.}
+    \label{fig:adjacency-matrices}
+\end{figure}
 
 \subsection{Visual Exploration}
 
@@ -87,7 +125,7 @@ The community results show that both projections contain internal structure. In 
 
 The server communities are easier to interpret visually because the graph contains only 21 nodes. The community colors reveal groups of servers that are close to each other in the projected graph, and the separation between groups is more visible. This makes the server graph a good case for interpreting the qualitative behavior of the algorithms.
 
-The computer graph is more difficult to interpret from the plot alone. It contains many more nodes and many shared relationships, so the drawing is naturally denser. In this case, the community assignment is more useful as a structural summary than as a purely visual result. Louvain gives a clearer view of this structure by grouping nodes according to modularity.
+The computer graph is more difficult to interpret from the plot alone. It contains many more nodes and many shared relationships, so the drawing is naturally denser. In this case, the community assignment is more useful as a structural summary than as a purely visual result. Louvain gives a clearer view of this structure by grouping nodes according to modularity, as shown in Figure~\ref{fig:computer-louvain}.
 
 Overall, the community detection step confirms that the dataset is not just a uniform collection of connections. Both graphs contain groups of nodes with stronger internal similarity, but the best way to observe this structure depends on the graph. The full visual comparison of both algorithms on both graphs is included in the notebook.
 
@@ -107,7 +145,26 @@ The largest clique in the server graph has size 11. Since the server graph conta
 
 The largest clique in the computer graph has size 69. This is also an important result because it shows that a large subset of computers is pairwise connected through shared servers. The computers in this clique do not necessarily have identical server connections, but every pair of them shares at least one server.
 
-The size of the computer clique also explains why the computer graph appears dense and difficult to interpret visually. A clique of 69 nodes creates many pairwise relationships, so the graph contains a large highly connected region. In this case, the clique analysis is more informative than the raw plot alone, because it identifies the exact presence of a fully connected structure.
+The size of the computer clique also explains why the computer graph appears dense and difficult to interpret visually. A clique of 69 nodes creates many pairwise relationships, so the graph contains a large highly connected region. In this case, the clique analysis is more informative than the raw plot alone, because it identifies the exact presence of a fully connected structure. The highlighted clique is shown in Figure~\ref{fig:computer-clique}.
+
+\begin{figure}[h]
+    \centering
+    \begin{subfigure}{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{../res/Communities_Computers_Louvain.png}
+        \caption{Louvain communities.}
+        \label{fig:computer-louvain}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{../res/Largest_Clique_Computers.png}
+        \caption{Largest clique.}
+        \label{fig:computer-clique}
+    \end{subfigure}
+    \caption{Computer projection: community structure and largest clique.}
+    \label{fig:computer-structure}
+\end{figure}
 
 \subsection{Interpretation}
 
