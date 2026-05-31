@@ -1,6 +1,6 @@
 import os
 from math import ceil
-from typing import Dict, Tuple, List, Hashable, Any, Set
+from typing import Dict, Tuple, List, Hashable, Any, Set, Iterable
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +10,22 @@ from numpy import ndarray
 from pandas import DataFrame
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap, Normalize
 import matplotlib.pyplot as plt
+
+try:
+    from ipywidgets import IntSlider, fixed, interact
+except ImportError:
+    IntSlider = None
+    fixed = None
+    interact = None
+
+try:
+    from IPython import get_ipython
+except ImportError:
+    get_ipython = None
+
+
+PRINT_MODE: bool = True
+PLOT_MODE: bool = True
 
 
 ########## CLASSES ##########
@@ -49,36 +65,44 @@ class Representation:
 
     def plot_graph(self, min_weight: float | None = None, max_edges: int | None = None, label_top_n: int = 0,
                    show_isolated_nodes: bool = False, node_color: str = "deeppink") -> None:
-        networkx_graph = get_filtered_graph(self.graph, min_weight)
-        networkx_graph = get_strongest_edges_graph(networkx_graph, max_edges)
-        if not show_isolated_nodes:
-            networkx_graph.remove_nodes_from(list(nx.isolates(networkx_graph)))
+        networkx_graph = get_display_graph(self.graph, min_weight, max_edges, show_isolated_nodes)
         node_count = networkx_graph.number_of_nodes()
 
         figure_size = (14, 14) if node_count <= 50 else (22, 22)
         figure, axis = plt.subplots(figsize=figure_size)
 
-        degrees = get_weighted_degrees(networkx_graph)
         positions = get_graph_layout(networkx_graph)
-        edges = list(networkx_graph.edges(data=True))
-
-        plot_weighted_edges(axis, positions, edges)
-
-        for node in networkx_graph.nodes:
-            x, y = positions[node]
-            axis.scatter(x, y, s=70, color=node_color,
-                         edgecolor="white", linewidth=0.6, zorder=2)
-
-        label_nodes = get_label_nodes(degrees, node_count, label_top_n)
-        for node in label_nodes:
-            x, y = positions[node]
-            axis.text(x * 1.08, y * 1.08, str(node), ha="center", va="center", fontsize=8)
-
-        axis.set_title(f"{self.entity} Projection Graph")
-        axis.set_aspect("equal")
-        axis.margins(0.08)
-        axis.axis("off")
+        draw_projection_graph(axis, networkx_graph, positions, node_color, label_top_n,
+                              f"{self.entity} Projection Graph")
         save_plot(figure, f"Graph_{self.entity}_projection.png")
+
+
+    def explore_graph_interactively(self, show_isolated_nodes: bool = False, label_top_n: int = 0,
+                                    node_color: str = "deeppink") -> None:
+        if IntSlider is None or fixed is None or interact is None:
+            raise ImportError("ipywidgets is required for interactive graph exploration.")
+
+        weights = nx.get_edge_attributes(self.graph, "weight").values()
+        max_weight = int(max(weights)) if weights else 1
+
+        interact(self.plot_filtered_graph_inline,
+                 min_weight=IntSlider(value=1, min=1, max=max_weight, step=1, description="Min weight"),
+                 show_isolated_nodes=fixed(show_isolated_nodes),
+                 label_top_n=fixed(label_top_n),
+                 node_color=fixed(node_color))
+
+
+    def plot_filtered_graph_inline(self, min_weight: int, show_isolated_nodes: bool = False,
+                                   label_top_n: int = 0, node_color: str = "deeppink") -> None:
+        networkx_graph = get_display_graph(self.graph, min_weight, None, show_isolated_nodes)
+        node_count = networkx_graph.number_of_nodes()
+
+        figure_size = (10, 10) if node_count <= 50 else (14, 14)
+        figure, axis = plt.subplots(figsize=figure_size)
+        positions = get_graph_layout(self.graph)
+        title = f"{self.entity} Projection Graph - Minimum Edge Weight: {min_weight}"
+        draw_projection_graph(axis, networkx_graph, positions, node_color, label_top_n, title)
+        plt.show()
 
 
     def compute_centrality_measures(self) -> DataFrame:
@@ -233,7 +257,10 @@ class Data:
         for representation in [self.computers, self.servers]:
             if PLOT_MODE:
                 representation.plot_adjacency_matrix_heatmap(color = "RdPu")
-                representation.plot_graph()
+                if is_notebook_environment() and has_notebook_widgets():
+                    representation.explore_graph_interactively()
+                else:
+                    representation.plot_graph()
             if PRINT_MODE:
                 print_top_centrality_tables(representation.compute_centrality_measures(), representation.entity)
 
@@ -303,6 +330,19 @@ def format_memory_usage(bytes_count: int) -> str:
     if bytes_count < 1024 ** 2:
         return f"{bytes_count / 1024:.1f} KB"
     return f"{bytes_count / (1024 ** 2):.1f} MB"
+
+
+def is_notebook_environment() -> bool:
+    if get_ipython is None:
+        return False
+    shell = get_ipython()
+    if shell is None:
+        return False
+    return shell.__class__.__name__ == "ZMQInteractiveShell"
+
+
+def has_notebook_widgets() -> bool:
+    return IntSlider is not None and fixed is not None and interact is not None
 
 
 def print_limited_nodes(nodes: Set, limit: int = 10) -> None:
@@ -429,6 +469,35 @@ def plot_computer_connection_counts(counts: pd.Series) -> None:
     save_plot(figure, "Barchart_Computers.png")
 
 
+def draw_projection_graph(axis: plt.Axes, graph: nx.Graph, positions: Dict[Hashable, np.ndarray],
+                          node_color: str, label_top_n: int, title: str) -> None:
+    plot_weighted_edges(axis, positions, list(graph.edges(data=True)))
+    plot_nodes(axis, positions, graph.nodes, node_color)
+    plot_node_labels(axis, positions, graph, label_top_n)
+
+    axis.set_title(title)
+    axis.set_aspect("equal")
+    axis.margins(0.08)
+    axis.axis("off")
+
+
+def plot_nodes(axis: plt.Axes, positions: Dict[Hashable, np.ndarray], nodes: Iterable[Hashable],
+               node_color: str) -> None:
+    for node in nodes:
+        x, y = positions[node]
+        axis.scatter(x, y, s=70, color=node_color,
+                     edgecolor="white", linewidth=0.6, zorder=2)
+
+
+def plot_node_labels(axis: plt.Axes, positions: Dict[Hashable, np.ndarray], graph: nx.Graph,
+                     label_top_n: int) -> None:
+    degrees = get_weighted_degrees(graph)
+    label_nodes = get_label_nodes(degrees, graph.number_of_nodes(), label_top_n)
+    for node in label_nodes:
+        x, y = positions[node]
+        axis.text(x * 1.08, y * 1.08, str(node), ha="center", va="center", fontsize=8)
+
+
 def plot_weighted_edges(axis: plt.Axes, positions: Dict[Hashable, np.ndarray],
                         edges: List[Tuple[Hashable, Hashable, Dict[str, float]]]) -> None:
     weights = get_weights(edges)
@@ -490,6 +559,15 @@ def get_filtered_graph(graph: nx.Graph, min_weight: float | None = None) -> nx.G
         if min_weight is None or attributes["weight"] >= min_weight:
             filtered_graph.add_edge(node0, node1, weight=attributes["weight"])
     return filtered_graph
+
+
+def get_display_graph(graph: nx.Graph, min_weight: float | None = None, max_edges: int | None = None,
+                      show_isolated_nodes: bool = False) -> nx.Graph:
+    display_graph = get_filtered_graph(graph, min_weight)
+    display_graph = get_strongest_edges_graph(display_graph, max_edges)
+    if not show_isolated_nodes:
+        display_graph.remove_nodes_from(list(nx.isolates(display_graph)))
+    return display_graph
 
 
 def get_strongest_edges_graph(graph: nx.Graph, max_edges: int | None) -> nx.Graph:
@@ -640,8 +718,6 @@ def print_top_centrality_tables(centrality_table: DataFrame, entity: str, top_n:
 
 
 if __name__ == '__main__':
-    PRINT_MODE: bool = True
-    PLOT_MODE: bool = True
     data_class: Data = Data()
     data_class.explore()
     data_class.indentify_communities()
