@@ -23,6 +23,11 @@ try:
 except ImportError:
     get_ipython = None
 
+try:
+    from IPython.display import display
+except ImportError:
+    display = None
+
 
 PRINT_MODE: bool = True
 PLOT_MODE: bool = True
@@ -338,7 +343,7 @@ def is_notebook_environment() -> bool:
     shell = get_ipython()
     if shell is None:
         return False
-    return shell.__class__.__name__ == "ZMQInteractiveShell"
+    return "IPKernelApp" in shell.config
 
 
 def has_notebook_widgets() -> bool:
@@ -358,9 +363,8 @@ def print_limited_nodes(nodes: Set, limit: int = 10) -> None:
 
 def format_community_members(community_index: int, community: Set, limit: int = 10) -> str:
     sorted_nodes = sort_nodes(community)
-    visible_nodes = sorted_nodes[:limit]
     suffix = ", ..." if len(sorted_nodes) > limit else ""
-    members = ", ".join(str(node) for node in visible_nodes)
+    members = ", ".join(str(node) for node in sorted_nodes[:limit])
     return f"Community {community_index + 1} (size={len(community)}): {members}{suffix}"
 
 
@@ -404,6 +408,10 @@ def save_plot(figure: plt.Figure, file_name: str) -> None:
     os.makedirs("res", exist_ok=True)
     figure.tight_layout()
     figure.savefig(f"res/{file_name}", bbox_inches="tight")
+    if is_notebook_environment():
+        plt.figure(figure.number)
+        plt.show()
+        return
     plt.close(figure)
 
 
