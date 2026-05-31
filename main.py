@@ -1,5 +1,4 @@
 import os
-from dataclasses import dataclass
 from math import ceil
 from typing import Dict, Tuple, List, Hashable, Any, Set
 from pathlib import Path
@@ -11,6 +10,7 @@ from numpy import ndarray
 from pandas import DataFrame
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap, Normalize
 import matplotlib.pyplot as plt
+
 
 ########## CLASSES ##########
 
@@ -41,7 +41,6 @@ class Representation:
         }
 
     def plot_adjacency_matrix_heatmap(self, color: str) -> None:
-        print(f"##### ADJACENCY HEATMAP: {self.entity} #####")
         size = ceil(self.matrix.shape[0] * 0.22)
         plot_heatmap(self.matrix, self.labels, self.labels, (size, size), x_on_top=True,
                      title=f"{self.entity} Projection Adjacency Matrix",
@@ -50,7 +49,6 @@ class Representation:
 
     def plot_graph(self, min_weight: float | None = None, max_edges: int | None = None, label_top_n: int = 0,
                    show_isolated_nodes: bool = False, node_color: str = "deeppink") -> None:
-        print(f"##### GRAPH: {self.entity} #####")
         networkx_graph = get_filtered_graph(self.graph, min_weight)
         networkx_graph = get_strongest_edges_graph(networkx_graph, max_edges)
         if not show_isolated_nodes:
@@ -64,15 +62,7 @@ class Representation:
         positions = get_graph_layout(networkx_graph)
         edges = list(networkx_graph.edges(data=True))
 
-        weights = get_weights(edges)
-        min_edge_weight, max_edge_weight = min(weights) if weights else 0, max(weights) if weights else 0
-        edge_color_map = LinearSegmentedColormap.from_list("edge_weight", ["lightgray", "black"])
-        edge_color_normalizer = Normalize(vmin=min_edge_weight, vmax=max_edge_weight)
-        for node0, node1, attributes in edges:
-            weight = attributes["weight"]
-            axis.plot([positions[node0][0], positions[node1][0]],
-                      [positions[node0][1], positions[node1][1]], color=edge_color_map(edge_color_normalizer(weight)),
-                      zorder=1, linewidth=0.6, alpha=0.7)
+        plot_weighted_edges(axis, positions, edges)
 
         for node in networkx_graph.nodes:
             x, y = positions[node]
@@ -100,9 +90,16 @@ class Representation:
         centrality_table.index.name = "node"
         return centrality_table
 
-    def identify_communities(self) -> None:
-        self.show_communities(self.detect_communities_with_louvain(), "Louvain", color="Set1")
-        self.show_communities(self.detect_communities_with_girvan_newman(), "Girvan-Newman", "Set1")
+    def identify_communities(self) -> Dict[str, int]:
+        louvain_communities = self.detect_communities_with_louvain()
+        girvan_newman_communities = self.detect_communities_with_girvan_newman()
+
+        self.show_communities(louvain_communities, "Louvain", color="Set1")
+        self.show_communities(girvan_newman_communities, "Girvan-Newman", "Set1")
+        return {
+            "Louvain": len(louvain_communities),
+            "Girvan-Newman": len(girvan_newman_communities)
+        }
 
 
     def detect_communities_with_girvan_newman(self) -> List[Set]:
@@ -131,26 +128,17 @@ class Representation:
 
     def show_communities(self, communities: List[Set], algorithm: str, color: str,
                          edge_mode: str = "intra_community") -> None:
-        print(f"\n##### COMMUNITIES: {self.entity} - {algorithm} {len(communities)} #####")
+        print_section(f"COMMUNITIES: {self.entity} - {algorithm}")
         print_community_statistics(self.graph, communities)
         for community_index, community in enumerate(communities):
-            print(f"Community {community_index + 1}: {', '.join(str(node) for node in sorted(community))}")
+            print(format_community_members(community_index, community))
         figure_size = (14, 14) if self.graph.number_of_nodes() <= 50 else (22, 22)
         figure, axis = plt.subplots(figsize=figure_size)
 
         positions = get_graph_layout(self.graph)
         node_communities = get_node_communities(communities)
         edges = get_community_plot_edges(self.graph, node_communities, edge_mode)
-        weights = get_weights(edges)
-        min_edge_weight, max_edge_weight = min(weights) if weights else 0, max(weights) if weights else 0
-        edge_color_map = LinearSegmentedColormap.from_list("edge_weight", ["lightgray", "black"])
-        edge_color_normalizer = Normalize(vmin=min_edge_weight, vmax=max_edge_weight)
-
-        for node0, node1, attributes in edges:
-            weight = attributes["weight"]
-            axis.plot([positions[node0][0], positions[node1][0]],
-                      [positions[node0][1], positions[node1][1]], color=edge_color_map(edge_color_normalizer(weight)),
-                      zorder=1, linewidth=0.6, alpha=0.7)
+        plot_weighted_edges(axis, positions, edges)
 
         color_map = plt.get_cmap(color)
         node_colors = {}
@@ -173,16 +161,15 @@ class Representation:
 
     def identify_largest_clique(self) -> Set:
         largest_clique = get_largest_clique(self.graph)
-        print(f"\n##### LARGEST CLIQUE: {self.entity} #####")
-        print(f"Size: {len(largest_clique)}")
-        print(f"Nodes: {', '.join(str(node) for node in sorted(largest_clique))}")
+        print_section(f"LARGEST CLIQUE: {self.entity}")
+        print(f"Clique size: {len(largest_clique)}")
+        print_limited_nodes(largest_clique)
         self.plot_largest_clique(largest_clique)
         return largest_clique
 
 
     def plot_largest_clique(self, largest_clique: Set, clique_color: str = "deeppink",
                             node_color: str = "lightgray") -> None:
-        print(f"##### CLIQUE PLOT: {self.entity} #####")
         figure_size = (14, 14) if self.graph.number_of_nodes() <= 50 else (22, 22)
         figure, axis = plt.subplots(figsize=figure_size)
 
@@ -216,12 +203,11 @@ class Representation:
 
 
     def identify_heavy_hitters(self, top_n: int = 10) -> None:
-        print(f"\n##### HEAVY HITTERS: {self.entity} #####")
+        print_section(f"HEAVY HITTERS: {self.entity}")
         print_node_heavy_hitters(self.graph, top_n)
         print_edge_heavy_hitters(self.graph, top_n)
 
 
-@dataclass
 class Data:
     dataframe: pd.DataFrame
     computers: Representation
@@ -233,6 +219,8 @@ class Data:
                                         [column[column == 1].index.tolist() for _, column in self.dataframe.items()])
         self.servers = (Representation("Servers", self.dataframe.columns.tolist(),
                                        [row[row == 1].index.tolist() for _, row in self.dataframe.iterrows()]))
+        self.community_counts: Dict[str, Dict[str, int]] = {}
+        self.largest_clique_sizes: Dict[str, int] = {}
 
     def explore(self) -> None:
         if PRINT_MODE:
@@ -251,10 +239,12 @@ class Data:
 
 
     def print_basic_statistics(self) -> None:
-        print("##### BASIC STATISTICS #####")
-        print(self.dataframe.head())
-        print(self.dataframe.describe())
-        self.dataframe.info()
+        print_section("BASIC STATISTICS")
+        rows, columns = self.dataframe.shape
+        memory_usage = self.dataframe.memory_usage(deep=True).sum()
+        print(f"{'Rows':<20}{rows:>10}")
+        print(f"{'Columns':<20}{columns:>10}")
+        print(f"{'Memory usage':<20}{format_memory_usage(memory_usage):>10}")
 
 
     def plot_connection_heatmap(self) -> None:
@@ -270,31 +260,87 @@ class Data:
 
 
     def print_graph_summaries(self) -> None:
-        print("##### GRAPH SUMMARY #####")
-        computers: Dict[str, object] = self.computers.compute_graph_summary()
-        servers: Dict[str, object] = self.servers.compute_graph_summary()
-        summary_table = pd.DataFrame([computers, servers]).set_index("graph")
-
-        print("\nProjected graph summary")
-        print(summary_table.to_string(float_format=lambda value: f"{value:.4f}"))
+        print_section("GRAPH SUMMARY")
+        print_graph_summary(self.computers.compute_graph_summary())
+        print()
+        print_graph_summary(self.servers.compute_graph_summary())
 
 
     def indentify_communities(self) -> None:
-        self.servers.identify_communities()
-        self.computers.identify_communities()
+        self.community_counts["Servers"] = self.servers.identify_communities()
+        self.community_counts["Computers"] = self.computers.identify_communities()
 
 
     def identify_largest_cliques(self) -> None:
-        self.servers.identify_largest_clique()
-        self.computers.identify_largest_clique()
+        self.largest_clique_sizes["Servers"] = len(self.servers.identify_largest_clique())
+        self.largest_clique_sizes["Computers"] = len(self.computers.identify_largest_clique())
 
 
     def identify_heavy_hitters(self) -> None:
         self.servers.identify_heavy_hitters()
         self.computers.identify_heavy_hitters()
 
+    def print_final_summary(self) -> None:
+        print_section("FINAL SUMMARY")
+        print(f"Computers: {self.computers.graph.number_of_nodes()}")
+        print(f"Servers: {self.servers.graph.number_of_nodes()}")
+        print(f"Largest computer clique: {self.largest_clique_sizes.get('Computers', 'Not computed')}")
+        print(f"Largest server clique: {self.largest_clique_sizes.get('Servers', 'Not computed')}")
+        print("Analysis completed successfully")
+
 
 ########## HELPER FUNCTIONS ##########
+##### CONSOLE OUTPUT #####
+def print_section(title: str) -> None:
+    print("\n" + "=" * 80)
+    print(title)
+    print("=" * 80)
+
+
+def format_memory_usage(bytes_count: int) -> str:
+    if bytes_count < 1024:
+        return f"{bytes_count} B"
+    if bytes_count < 1024 ** 2:
+        return f"{bytes_count / 1024:.1f} KB"
+    return f"{bytes_count / (1024 ** 2):.1f} MB"
+
+
+def print_limited_nodes(nodes: Set, limit: int = 10) -> None:
+    sorted_nodes = sort_nodes(nodes)
+    visible_nodes = sorted_nodes[:limit]
+    omitted_count = len(sorted_nodes) - len(visible_nodes)
+    suffix = ", ..." if omitted_count > 0 else ""
+
+    print(f"First members: {', '.join(str(node) for node in visible_nodes)}{suffix}")
+    if omitted_count > 0:
+        print(f"({omitted_count} additional nodes omitted)")
+
+
+def format_community_members(community_index: int, community: Set, limit: int = 10) -> str:
+    sorted_nodes = sort_nodes(community)
+    visible_nodes = sorted_nodes[:limit]
+    suffix = ", ..." if len(sorted_nodes) > limit else ""
+    members = ", ".join(str(node) for node in visible_nodes)
+    return f"Community {community_index + 1} (size={len(community)}): {members}{suffix}"
+
+
+def sort_nodes(nodes: Set) -> List:
+    try:
+        return sorted(nodes)
+    except TypeError:
+        return sorted(nodes, key=str)
+
+
+def print_graph_summary(summary: Dict[str, object]) -> None:
+    print(summary["graph"])
+    print(f"  {'Nodes':<24}{summary['nodes']:>10}")
+    print(f"  {'Edges':<24}{summary['edges']:>10}")
+    print(f"  {'Density':<24}{summary['density']:>10.3f}")
+    print(f"  {'Connected components':<24}{summary['connected_components']:>10}")
+    print(f"  {'Largest component':<24}{summary['largest_component_size']:>10}")
+    print(f"  {'Connected':<24}{str(summary['is_connected']):>10}")
+
+
 ##### READ-WRITE OPERATIONS #####
 def get_data_path() -> Path:
     return Path(os.path.join("data" if os.path.exists("data") else ".", "Autonomous_Systems.csv"))
@@ -381,6 +427,20 @@ def plot_computer_connection_counts(counts: pd.Series) -> None:
     axis.invert_yaxis()
     axis.margins(x=0.0, y=0.002)
     save_plot(figure, "Barchart_Computers.png")
+
+
+def plot_weighted_edges(axis: plt.Axes, positions: Dict[Hashable, np.ndarray],
+                        edges: List[Tuple[Hashable, Hashable, Dict[str, float]]]) -> None:
+    weights = get_weights(edges)
+    min_edge_weight, max_edge_weight = min(weights) if weights else 0, max(weights) if weights else 0
+    edge_color_map = LinearSegmentedColormap.from_list("edge_weight", ["lightgray", "black"])
+    edge_color_normalizer = Normalize(vmin=min_edge_weight, vmax=max_edge_weight)
+
+    for node0, node1, attributes in edges:
+        weight = attributes["weight"]
+        axis.plot([positions[node0][0], positions[node1][0]],
+                  [positions[node0][1], positions[node1][1]], color=edge_color_map(edge_color_normalizer(weight)),
+                  zorder=1, linewidth=0.6, alpha=0.7)
 
 
 
@@ -476,12 +536,10 @@ def get_community_plot_edges(graph: nx.Graph, node_communities: Dict[Hashable, i
 
 
 def print_community_statistics(graph: nx.Graph, communities: List[Set]) -> None:
-    sizes = sorted([len(community) for community in communities], reverse=True)
     modularity = nx.community.modularity(graph, communities, weight="weight") if communities else 0
 
-    print(f"Number of communities: {len(communities)}")
-    print(f"Modularity: {modularity:.4f}")
-    print(f"Community sizes: {', '.join(str(size) for size in sizes)}")
+    print(f"{'Number of communities':<24}{len(communities):>10}")
+    print(f"{'Modularity':<24}{modularity:>10.3f}")
 
 
 def get_graph_layout(graph: nx.Graph) -> Dict[Hashable, np.ndarray]:
@@ -549,27 +607,36 @@ def get_weights(edges: List[Tuple[Hashable, Hashable, Dict[str, float]]]) -> Lis
 
 
 def print_node_heavy_hitters(graph: nx.Graph, top_n: int) -> None:
+    top_n = min(top_n, 10)
     weighted_degrees = sorted(graph.degree(weight="weight"), key=lambda item: item[1], reverse=True)[:top_n]
 
     print(f"\nTop {top_n} nodes by weighted degree")
-    for node, weighted_degree in weighted_degrees:
-        print(f"{node}: {weighted_degree:.0f}")
+    print(f"{'Rank':>4} | {'Node':<18} | {'Weighted Degree':>15}")
+    for rank, (node, weighted_degree) in enumerate(weighted_degrees, start=1):
+        print(f"{rank:>4} | {str(node):<18} | {weighted_degree:>15.0f}")
 
 
 def print_edge_heavy_hitters(graph: nx.Graph, top_n: int) -> None:
+    top_n = min(top_n, 10)
     edges = sorted(graph.edges(data=True), key=lambda edge: edge[2]["weight"], reverse=True)[:top_n]
 
     print(f"\nTop {top_n} edges by weight")
-    for node0, node1, attributes in edges:
-        print(f"{node0} - {node1}: {attributes['weight']:.0f}")
+    print(f"{'Rank':>4} | {'Edge':<36} | {'Weight':>6}")
+    for rank, (node0, node1, attributes) in enumerate(edges, start=1):
+        edge = f"{node0} ↔ {node1}"
+        print(f"{rank:>4} | {edge:<36} | {attributes['weight']:>6.0f}")
 
 
 def print_top_centrality_tables(centrality_table: DataFrame, entity: str, top_n: int = 10) -> None:
-    print("##### TOP CENTRALITY TABLE #####")
-    for column_name in centrality_table.columns:
-        top_nodes = centrality_table.sort_values(column_name, ascending=False).head(top_n)
-        print(f"\nTop {top_n} {entity} nodes by {column_name.replace('_', ' ')}")
-        print(top_nodes.to_string(float_format=lambda value: f"{value:.4f}"))
+    print_section(f"TOP CENTRALITY: {entity}")
+    top_n = min(top_n, 10)
+    top_nodes = centrality_table.sort_values("degree_centrality", ascending=False).head(top_n).round(3)
+
+    print(f"Top {top_n} {entity} nodes by degree centrality")
+    print(f"{'Rank':>4} | {'Node':<18} | {'Degree':>8} | {'Closeness':>9} | {'Betweenness':>11}")
+    for rank, (node, row) in enumerate(top_nodes.iterrows(), start=1):
+        print(f"{rank:>4} | {str(node):<18} | {row['degree_centrality']:>8.3f} | "
+              f"{row['closeness_centrality']:>9.3f} | {row['betweenness_centrality']:>11.3f}")
 
 
 if __name__ == '__main__':
@@ -580,3 +647,4 @@ if __name__ == '__main__':
     data_class.indentify_communities()
     data_class.identify_largest_cliques()
     data_class.identify_heavy_hitters()
+    data_class.print_final_summary()
