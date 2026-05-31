@@ -45,7 +45,7 @@ The analysis was first developed in a Python script and then transferred to a no
 
 The dataset is a binary connection matrix: rows represent computers, columns represent servers, and each entry indicates whether a connection exists.
 
-During loading, empty rows and columns are removed because they do not contribute meaningful information to the projected graphs. Basic statistics and the cleaned matrix visualization are provided in the notebook, while Figure~\ref{fig:original-matrix} gives a compact view of the original matrix and the two projections.
+During loading, empty rows and columns are removed because they do not contribute meaningful information to the projected graphs. Basic statistics and the cleaned matrix visualization are provided in the notebook, while Figure~\ref{fig:matrices} gives a compact view of the original matrix and the two projections.
 
 \subsection{Graph Projections}
 
@@ -76,7 +76,7 @@ The edge weight is the number of shared connections, preserving the strength of 
         \label{fig:server-adjacency}
     \end{subfigure}
     \caption{Original connection matrix and weighted adjacency matrices. White cells indicate no edge; darker cells indicate stronger shared-connection weights.}
-    \label{fig:adjacency-matrices}
+    \label{fig:matrices}
 \end{figure}
 
 \subsection{Visual Exploration}
